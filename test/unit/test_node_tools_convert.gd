@@ -123,8 +123,11 @@ func test_convert_value_for_property_vector2_from_key_value_string():
 
 func test_convert_value_for_property_nodepath():
 	var node: Node3D = Node3D.new()
-	node.set_script(GDScript.new())
-	var result: Variant = _node_tools._convert_value_for_property(node, "name", "../Camera3D")
+	var script: GDScript = GDScript.new()
+	script.set_source_code("extends Node3D\n@export var target: NodePath = NodePath(\"\")")
+	script.reload()
+	node.set_script(script)
+	var result: Variant = _node_tools._convert_value_for_property(node, "target", "../Camera3D")
 	assert_eq(result, NodePath("../Camera3D"), "Should convert string to NodePath for TYPE_NODE_PATH")
 	node.free()
 

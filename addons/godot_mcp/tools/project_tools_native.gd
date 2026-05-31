@@ -250,8 +250,8 @@ func _register_upsert_project_input_action(server_core: RefCounted) -> void:
 			"existed_before": {"type": "boolean"},
 			"deadzone": {"type": "number"},
 			"event_count": {"type": "integer"},
-			"events": {"type": "array"},
-			"added_events": {"type": "array"}
+			"events": {"type": "array", "items": {"type": "object"}},
+			"added_events": {"type": "array", "items": {"type": "object"}}
 		}
 	}
 

@@ -317,7 +317,7 @@ func _register_send_debugger_message(server_core: RefCounted) -> void:
 			"type": "object",
 			"properties": {
 				"message": {"type": "string"},
-				"data": {"type": "array"},
+				"data": {"type": "array", "items": {"type": "object"}},
 				"session_id": {"type": "integer"}
 			},
 			"required": ["message"]
@@ -348,7 +348,7 @@ func _register_toggle_debugger_profiler(server_core: RefCounted) -> void:
 			"properties": {
 				"profiler": {"type": "string", "description": "Profiler name"},
 				"enabled": {"type": "boolean"},
-				"data": {"type": "array"},
+				"data": {"type": "array", "items": {"type": "object"}},
 				"session_id": {"type": "integer"}
 			},
 			"required": ["profiler", "enabled"]
@@ -1366,7 +1366,7 @@ func _register_send_debug_command(server_core: RefCounted) -> void:
 			"type": "object",
 			"properties": {
 				"command": {"type": "string", "enum": ["step", "next", "out", "continue", "get_stack_dump", "get_stack_frame_vars"]},
-				"data": {"type": "array", "description": "Command payload, e.g. [0] for get_stack_frame_vars frame 0."},
+				"data": {"type": "array", "items": {"type": "object"}, "description": "Command payload, e.g. [0] for get_stack_frame_vars frame 0."},
 				"session_id": {"type": "integer", "description": "Optional debugger session id. Omit or use -1 for all active sessions."}
 			},
 			"required": ["command"]
@@ -1841,14 +1841,14 @@ func _register_call_runtime_node_method(server_core: RefCounted) -> void:
 			"properties": {
 				"node_path": {"type": "string"},
 				"method_name": {"type": "string"},
-				"arguments": {"type": "array"},
+				"arguments": {"type": "array", "items": {"type": "object"}},
 				"session_id": {"type": "integer"},
 				"timeout_ms": {"type": "integer", "default": 1500}
 			},
 			"required": ["node_path", "method_name"]
 		},
 		Callable(self, "_tool_call_runtime_node_method"),
-		{"type": "object", "properties": {"node_path": {"type": "string"}, "method_name": {"type": "string"}, "arguments": {"type": "array"}, "result": {}}},
+		{"type": "object", "properties": {"node_path": {"type": "string"}, "method_name": {"type": "string"}, "arguments": {"type": "array", "items": {"type": "object"}}, "result": {}}},
 		{"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": true},
 		"supplementary", "Debug-Advanced"
 	)
@@ -1983,7 +1983,7 @@ func _register_upsert_runtime_input_action(server_core: RefCounted) -> void:
 			"required": ["action_name"]
 		},
 		Callable(self, "_tool_upsert_runtime_input_action"),
-		{"type": "object", "properties": {"action_name": {"type": "string"}, "existed_before": {"type": "boolean"}, "deadzone": {"type": "number"}, "event_count": {"type": "integer"}, "events": {"type": "array"}, "added_events": {"type": "array"}}},
+		{"type": "object", "properties": {"action_name": {"type": "string"}, "existed_before": {"type": "boolean"}, "deadzone": {"type": "number"}, "event_count": {"type": "integer"}, "events": {"type": "array", "items": {"type": "object"}}, "added_events": {"type": "array", "items": {"type": "object"}}}},
 		{"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": true},
 		"supplementary", "Debug-Advanced"
 	)

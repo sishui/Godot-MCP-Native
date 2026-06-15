@@ -54,7 +54,7 @@ func register_tools(server_core: RefCounted) -> void:
 
 func _register_list_project_scripts(server_core: RefCounted) -> void:
 	var tool_name: String = "list_project_scripts"
-	var description: String = "List all GDScript files (.gd) in the project. Returns paths relative to res://."
+	var description: String = "List all GDScript (.gd) and C# (.cs) script files in the project. Returns paths relative to res://."
 	
 	# inputSchema
 	var input_schema: Dictionary = {
@@ -611,8 +611,8 @@ func _collect_scripts(directory_path: String, result: Array) -> void:
 			if dir.current_is_dir():
 				# 递归处理子目录
 				_collect_scripts(full_path, result)
-			elif file_name.ends_with(".gd"):
-				# 添加脚本文件
+			elif file_name.ends_with(".gd") or file_name.ends_with(".cs"):
+				# 添加脚本文件（GDScript 或 C#）
 				result.append(full_path)
 		
 		file_name = dir.get_next()
@@ -1203,7 +1203,7 @@ func _rename_symbol_in_file(file_path: String, symbol_name: String, new_name: St
 
 func _register_read_script(server_core: RefCounted) -> void:
 	var tool_name: String = "read_script"
-	var description: String = "Read the content of a GDScript file (.gd). Returns the complete script source code."
+	var description: String = "Read the content of a GDScript (.gd) or C# (.cs) script file. Returns the complete script source code."
 	
 	# inputSchema
 	var input_schema: Dictionary = {
@@ -1249,7 +1249,7 @@ func _tool_read_script(params: Dictionary) -> Dictionary:
 		return {"error": "Missing required parameter: script_path"}
 	
 	# 使用PathValidator验证路径安全性
-	var validation: Dictionary = PathValidator.validate_file_path(script_path, [".gd"])
+	var validation: Dictionary = PathValidator.validate_file_path(script_path, [".gd", ".cs"])
 	if not validation["valid"]:
 		return {"error": "Invalid path: " + validation["error"]}
 	
@@ -1281,7 +1281,7 @@ func _tool_read_script(params: Dictionary) -> Dictionary:
 
 func _register_create_script(server_core: RefCounted) -> void:
 	var tool_name: String = "create_script"
-	var description: String = "Create a new GDScript file with optional template. GDScript files are complete programs, not resource files."
+	var description: String = "Create a new GDScript (.gd) or C# (.cs) script file with optional template."
 	
 	# inputSchema
 	var input_schema: Dictionary = {
@@ -1289,11 +1289,11 @@ func _register_create_script(server_core: RefCounted) -> void:
 		"properties": {
 			"script_path": {
 				"type": "string",
-				"description": "Path where the script will be saved (e.g. 'res://scripts/player.gd')"
+				"description": "Path where the script will be saved (e.g. 'res://scripts/player.gd' or 'res://scripts/Player.cs')"
 			},
 			"content": {
 				"type": "string",
-				"description": "Optional initial content for the script. If not provided, creates an empty script."
+				"description": "Optional initial content for the script. If not provided, creates a template based on the file extension (.gd → GDScript, .cs → C#)."
 			},
 			"template": {
 				"type": "string",
@@ -1340,7 +1340,7 @@ func _tool_create_script(params: Dictionary) -> Dictionary:
 	if script_path.is_empty():
 		return {"error": "Missing required parameter: script_path"}
 
-	var validation: Dictionary = PathValidator.validate_file_path(script_path, [".gd"])
+	var validation: Dictionary = PathValidator.validate_file_path(script_path, [".gd", ".cs"])
 	if not validation["valid"]:
 		return {"error": "Invalid path: " + validation["error"]}
 
@@ -1350,7 +1350,10 @@ func _tool_create_script(params: Dictionary) -> Dictionary:
 		return {"error": "File already exists: " + script_path}
 
 	if content.is_empty():
-		content = _get_script_template(template)
+		if script_path.ends_with(".cs"):
+			content = _get_csharp_script_template(template, script_path.get_file().get_basename())
+		else:
+			content = _get_script_template(template)
 
 	var file: FileAccess = FileAccess.open(script_path, FileAccess.WRITE)
 	if not file:
@@ -1427,13 +1430,91 @@ func _physics_process(delta: float) -> void:
 	else:
 		return ""
 
+func _get_csharp_script_template(template_name: String, script_class_name: String) -> String:
+	var safe_name: String = script_class_name.replace(" ", "_").replace("-", "_")
+	if safe_name.is_empty():
+		safe_name = "NewScript"
+	
+	if template_name == "node":
+		return ("using Godot;\n"
+			+ "using System;\n"
+			+ "\n"
+			+ "public partial class " + safe_name + " : Node\n"
+			+ "{\n"
+			+ "\tpublic override void _Ready()\n"
+			+ "\t{\n"
+			+ "\t\t\n"
+			+ "\t}\n"
+			+ "\n"
+			+ "\tpublic override void _Process(double delta)\n"
+			+ "\t{\n"
+			+ "\t\t\n"
+			+ "\t}\n"
+			+ "}\n")
+	elif template_name == "characterbody2d":
+		return ("using Godot;\n"
+			+ "using System;\n"
+			+ "\n"
+			+ "public partial class " + safe_name + " : CharacterBody2D\n"
+			+ "{\n"
+			+ "\tpublic override void _PhysicsProcess(double delta)\n"
+			+ "\t{\n"
+			+ "\t\tMoveAndSlide();\n"
+			+ "\t}\n"
+			+ "}\n")
+	elif template_name == "characterbody3d":
+		return ("using Godot;\n"
+			+ "using System;\n"
+			+ "\n"
+			+ "public partial class " + safe_name + " : CharacterBody3D\n"
+			+ "{\n"
+			+ "\tpublic override void _PhysicsProcess(double delta)\n"
+			+ "\t{\n"
+			+ "\t\tMoveAndSlide();\n"
+			+ "\t}\n"
+			+ "}\n")
+	elif template_name == "area2d":
+		return ("using Godot;\n"
+			+ "using System;\n"
+			+ "\n"
+			+ "public partial class " + safe_name + " : Area2D\n"
+			+ "{\n"
+			+ "\tpublic override void _Ready()\n"
+			+ "\t{\n"
+			+ "\t\t\n"
+			+ "\t}\n"
+			+ "}\n")
+	elif template_name == "area3d":
+		return ("using Godot;\n"
+			+ "using System;\n"
+			+ "\n"
+			+ "public partial class " + safe_name + " : Area3D\n"
+			+ "{\n"
+			+ "\tpublic override void _Ready()\n"
+			+ "\t{\n"
+			+ "\t\t\n"
+			+ "\t}\n"
+			+ "}\n")
+	else:
+		# empty template
+		return ("using Godot;\n"
+			+ "using System;\n"
+			+ "\n"
+			+ "public partial class " + safe_name + " : Node\n"
+			+ "{\n"
+			+ "\tpublic override void _Ready()\n"
+			+ "\t{\n"
+			+ "\t\t\n"
+			+ "\t}\n"
+			+ "}\n")
+
 # ============================================================================
 # modify_script - 修改脚本内容
 # ============================================================================
 
 func _register_modify_script(server_core: RefCounted) -> void:
 	var tool_name: String = "modify_script"
-	var description: String = "Modify the content of an existing GDScript file. Can replace entire content or specific lines."
+	var description: String = "Modify the content of an existing GDScript (.gd) or C# (.cs) script file. Can replace entire content or specific lines."
 	
 	# inputSchema
 	var input_schema: Dictionary = {
@@ -1492,7 +1573,7 @@ func _tool_modify_script(params: Dictionary) -> Dictionary:
 		return {"error": "Missing required parameter: content"}
 	
 	# 使用PathValidator验证路径安全性
-	var validation: Dictionary = PathValidator.validate_file_path(script_path, [".gd"])
+	var validation: Dictionary = PathValidator.validate_file_path(script_path, [".gd", ".cs"])
 	if not validation["valid"]:
 		return {"error": "Invalid path: " + validation["error"]}
 	
@@ -1598,7 +1679,7 @@ func _tool_analyze_script(params: Dictionary) -> Dictionary:
 		return {"error": "Missing required parameter: script_path"}
 	
 	# 使用PathValidator验证路径安全性
-	var validation: Dictionary = PathValidator.validate_file_path(script_path, [".gd"])
+	var validation: Dictionary = PathValidator.validate_file_path(script_path, [".gd", ".cs"])
 	if not validation["valid"]:
 		return {"error": "Invalid path: " + validation["error"]}
 	
@@ -1735,7 +1816,7 @@ func _register_open_script_at_line(server_core: RefCounted) -> void:
 		"properties": {
 			"script_path": {
 				"type": "string",
-				"description": "Path to the script file (e.g. 'res://scripts/player.gd')."
+				"description": "Path to the script file (e.g. 'res://scripts/player.gd' or 'res://scripts/Player.cs')."
 			},
 			"line": {
 				"type": "integer",
@@ -1895,7 +1976,7 @@ func _tool_attach_script(params: Dictionary) -> Dictionary:
 	if not editor_interface:
 		return {"error": "Editor interface not available"}
 
-	var validation: Dictionary = PathValidator.validate_file_path(script_path, [".gd"])
+	var validation: Dictionary = PathValidator.validate_file_path(script_path, [".gd", ".cs"])
 	if not validation["valid"]:
 		return {"error": "Invalid script path: " + validation["error"]}
 	script_path = validation["sanitized"]
@@ -1988,7 +2069,7 @@ func _tool_validate_script(params: Dictionary) -> Dictionary:
 		content = _spaces_to_tabs(content)
 
 	if content.is_empty():
-		var validation: Dictionary = PathValidator.validate_file_path(script_path, [".gd"])
+		var validation: Dictionary = PathValidator.validate_file_path(script_path, [".gd", ".cs"])
 		if not validation["valid"]:
 			return {"error": "Invalid path: " + validation["error"]}
 		script_path = validation["sanitized"]

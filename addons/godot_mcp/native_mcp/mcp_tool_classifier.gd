@@ -68,6 +68,7 @@ func _build_classifications() -> void:
 		{"name": "request_debug_break", "category": "supplementary", "group": "Debug-Advanced"},
 		{"name": "send_debug_command", "category": "supplementary", "group": "Debug-Advanced"},
 		{"name": "get_runtime_info", "category": "supplementary", "group": "Debug-Advanced"},
+		{"name": "await_scene_ready", "category": "supplementary", "group": "Debug-Advanced"},
 		{"name": "get_runtime_scene_tree", "category": "supplementary", "group": "Debug-Advanced"},
 		{"name": "inspect_runtime_node", "category": "supplementary", "group": "Debug-Advanced"},
 		{"name": "update_runtime_node_property", "category": "supplementary", "group": "Debug-Advanced"},

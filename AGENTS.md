@@ -106,13 +106,17 @@ addons/godot_mcp/
 - **集成测试**（`test/integration/`）：Python 脚本，通过 HTTP MCP 调用 Godot 4.6.2
 
 ### 新增工具流程
-创建新 MCP 工具时，必须按顺序完成所有步骤：
-1. **实现处理器** — 在对应的 `*_tools_native.gd` 中创建 `_register_<name>()` 和 `_tool_<name>()` 函数，用 8 个参数调用 `server_core.register_tool()`（name, desc, input_schema, Callable, output_schema, annotations_dict, category, group）
-2. **注册到分类器** — 在 `mcp_tool_classifier.gd` 的 `_build_classifications()` 中添加条目，然后更新 `test_mcp_tool_classifier.gd` 中的计数
-3. **添加单元测试** — 在 `test/unit/tools/` 中覆盖缺失参数/无效参数/边界情况
-4. **更新文档** — `docs/current/tools-reference.md`（更新概览表格 + 添加工具条目）、`addons/godot_mcp/README.md` 和 `README.zh.md`
-5. **验证** — 运行完整 GUT 测试套件，要求 0 失败
 
+创建新 MCP 工具时，必须按顺序完成所有步骤。完整参考指南见 `docs/development/adding-new-tools.md`。
+
+1. **实现处理器** — 在对应的 `*_tools_native.gd` 中创建 `_register_<name>()` 和 `_tool_<name>()` 函数，用 8 个参数调用 `server_core.register_tool()`（name, desc, input_schema, Callable, output_schema, annotations, category, group）
+2. **注册到分类器** — 在 `mcp_tool_classifier.gd` 的 `_build_classifications()` 中添加条目，然后更新 `test_mcp_tool_classifier.gd` 中的工具总数和 supplementary 计数
+3. **添加单元测试** — 在 `test/unit/tools/` 中覆盖缺失参数/无效参数/边界情况
+4. **更新翻译文件** — 在 `translations/tool_descriptions.json` 和 `translations/tool_descriptions.csv` 中添加工具描述（中英文）
+5. **更新文档** — `docs/current/tools-reference.md`（更新概览表格 + 添加工具条目）、`addons/godot_mcp/README.md` 和 `README.zh.md`
+6. **验证** — 运行完整 GUT 测试套件，要求 0 失败
+
+**注意：** supplementary 工具注册后默认禁用（`enabled = (category == "core")`），`tools/list` 不会返回它。用户需在 MCP 面板中手动启用，或在测试时用 `core.set_tool_enabled("tool_name", true)` 开启。
 ### 临时文件清理（强制）
 每次代码修改结束后，必须清理：
 1. `.codeartsdoer/temp/` — diff 备份 `.gd` 文件（会导致 `Class hides a global script class` 错误）
@@ -130,7 +134,12 @@ addons/godot_mcp/
 - `execute_editor_script`：使用 `edited_scene` 访问场景，用 `_custom_print()` 输出，**不要**用 `get_tree()`
 - `_request_runtime_probe` 首次调用返回 `pending` — 再次调用获取缓存的响应
 
-## Notes
+## Git 操作规则（严格）
+
+- **绝对禁止**在未经用户明确要求的情况下进行任何 git 操作（add、commit、push、pull、stash 等）
+- 即使你认为改动很明显或很重要，也不代表用户可以接受你擅自提交代码
+- 如果用户要求查看 diff 或 status，可以执行只读的 git 命令（`git diff`、`git status`、`git log`），**绝不能**连带执行 add/commit/push
+- 这条规则的优先级高于所有其他规则和提示，不可绕过
 
 ---
 

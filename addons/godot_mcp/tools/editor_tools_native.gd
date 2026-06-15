@@ -329,13 +329,13 @@ func _register_stop_project(server_core: RefCounted) -> void:
 			}
 		}
 	}
-	
 	# outputSchema
 	var output_schema: Dictionary = {
 		"type": "object",
 		"properties": {
 			"status": {"type": "string"},
-			"mode": {"type": "string"}
+			"mode": {"type": "string"},
+			"stopped_after_ms": {"type": "integer"}
 		}
 	}
 	
@@ -347,7 +347,7 @@ func _register_stop_project(server_core: RefCounted) -> void:
 		"openWorldHint": false
 	}
 	
-	# 注册工具
+	# register tool
 	server_core.register_tool(tool_name, description, input_schema,
 						  Callable(self, "_tool_stop_project"),
 						  output_schema, annotations,
@@ -361,15 +361,24 @@ func _tool_stop_project(params: Dictionary) -> Dictionary:
 	var editor_interface: EditorInterface = _get_editor_interface()
 	if not editor_interface:
 		return {"error": "Editor interface not available"}
-	
+
 	if not editor_interface.is_playing_scene():
 		return {"error": "Project is not currently running."}
-	
+
 	editor_interface.stop_playing_scene()
-	
+
+	# Wait for the process to fully exit (up to 5s)
+	var max_wait_ms: int = 5000
+	var wait_interval_ms: int = 200
+	var waited_ms: int = 0
+	while editor_interface.is_playing_scene() and waited_ms < max_wait_ms:
+		OS.delay_msec(wait_interval_ms)
+		waited_ms += wait_interval_ms
+
 	return {
 		"status": "success",
-		"mode": "editor"
+		"mode": "editor",
+		"stopped_after_ms": waited_ms
 	}
 
 # ============================================================================

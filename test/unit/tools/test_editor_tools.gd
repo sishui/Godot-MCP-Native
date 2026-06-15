@@ -123,3 +123,19 @@ func test_editor_screenshot_uses_engine_main_loop():
 	var source_code: String = _editor_tools.get_script().source_code
 	assert_true(source_code.contains("Engine.get_main_loop()"), "get_editor_screenshot should use Engine.get_main_loop() instead of get_tree() for SceneTree access")
 	assert_false(source_code.contains("get_tree().process_frame"), "get_editor_screenshot should NOT use get_tree() which is unavailable on RefCounted")
+
+# --- Stop project wait logic tests ---
+
+func test_stop_project_waits_for_exit():
+	"""stop_project should call stop_playing_scene and wait for exit"""
+	var result: Dictionary = _editor_tools._tool_stop_project({"allow_window": true})
+	# In headless mode without editor interface, this returns error
+	assert_has(result, "status", "stop_project should return a status field")
+	# When successful, stopped_after_ms should be present
+	if result.get("status") == "success":
+		assert_has(result, "stopped_after_ms", "Successful stop should report stopped_after_ms")
+
+func test_stop_project_output_schema_includes_stopped_after_ms():
+	"""check _register_stop_project output_schema includes stopped_after_ms"""
+	var source_code: String = _editor_tools.get_script().source_code
+	assert_true(source_code.contains("stopped_after_ms"), "Source should reference stopped_after_ms")

@@ -108,6 +108,7 @@ func register_tools(server_core: RefCounted) -> void:
 	_register_debug_continue_and_wait(server_core)
 	_register_await_debugger_state(server_core)
 	_register_get_runtime_info(server_core)
+	_register_await_scene_ready(server_core)
 	_register_get_runtime_performance_snapshot(server_core)
 	_register_get_runtime_memory_trend(server_core)
 	_register_get_runtime_scene_tree(server_core)
@@ -1627,6 +1628,103 @@ func _tool_get_runtime_info(params: Dictionary) -> Dictionary:
 				return fallback
 	return result
 
+func _register_await_scene_ready(server_core: RefCounted) -> void:
+	server_core.register_tool(
+		"await_scene_ready",
+		"Poll the runtime until the specified scene is loaded and ready. Internally checks get_runtime_info().current_scene until it matches the requested scene name.",
+		{
+			"type": "object",
+			"properties": {
+				"scene_name": {
+					"type": "string",
+					"description": "The expected scene name (e.g. 'Main', 'GameLevel'). The tool waits until current_scene contains this name."
+				},
+				"timeout_sec": {
+					"type": "number",
+					"description": "Maximum time to wait in seconds.",
+					"default": 10
+				},
+				"session_id": {"type": "integer"}
+			},
+			"required": ["scene_name"]
+		},
+		Callable(self, "_tool_await_scene_ready"),
+		{
+			"type": "object",
+			"properties": {
+				"status": {"type": "string"},
+				"scene_name": {"type": "string"},
+				"elapsed_sec": {"type": "number"},
+				"timeout": {"type": "boolean"},
+				"attempts": {"type": "integer"}
+			}
+		},
+		{"readOnlyHint": true, "destructiveHint": false, "idempotentHint": false, "openWorldHint": true},
+		"supplementary", "Debug-Advanced"
+	)
+
+func _tool_await_scene_ready(params: Dictionary) -> Dictionary:
+	var scene_name: String = params.get("scene_name", "")
+	if scene_name.is_empty():
+		return {"error": "Missing required parameter: scene_name"}
+
+	var timeout_sec: float = float(params.get("timeout_sec", 10.0))
+	var timeout_ms: int = int(timeout_sec * 1000)
+	var poll_interval_ms: int = 200
+	var deadline_ms: int = Time.get_ticks_msec() + timeout_ms
+	var attempts: int = 0
+
+	while Time.get_ticks_msec() < deadline_ms:
+		attempts += 1
+		var runtime_info: Dictionary = await _tool_get_runtime_info(params)
+
+		if runtime_info.has("error"):
+			# Probe might not be ready yet, wait and retry
+			if Time.get_ticks_msec() + poll_interval_ms < deadline_ms:
+				var tree: SceneTree = Engine.get_main_loop() as SceneTree
+				if tree:
+					await tree.process_frame
+				else:
+					OS.delay_msec(poll_interval_ms)
+				continue
+			else:
+				return {
+					"status": "timeout",
+					"scene_name": scene_name,
+					"elapsed_sec": timeout_sec,
+					"timeout": true,
+					"error": "Timeout waiting for scene: " + runtime_info.get("error", "probe not available"),
+					"attempts": attempts
+				}
+
+		var current_scene_path: String = runtime_info.get("current_scene", "")
+		if not current_scene_path.is_empty() and current_scene_path.contains(scene_name):
+			var elapsed: float = (Time.get_ticks_msec() - (deadline_ms - timeout_ms)) / 1000.0
+			return {
+				"status": "success",
+				"scene_name": scene_name,
+				"elapsed_sec": elapsed,
+				"timeout": false,
+				"attempts": attempts
+			}
+
+		# Wait before next poll
+		if Time.get_ticks_msec() + poll_interval_ms < deadline_ms:
+			var tree: SceneTree = Engine.get_main_loop() as SceneTree
+			if tree:
+				await tree.process_frame
+			else:
+				OS.delay_msec(poll_interval_ms)
+
+	return {
+		"status": "timeout",
+		"scene_name": scene_name,
+		"elapsed_sec": timeout_sec,
+		"timeout": true,
+		"attempts": attempts,
+		"error": "Timeout: scene '" + scene_name + "' not ready after " + str(timeout_sec) + " seconds"
+	}
+
 func _register_get_runtime_performance_snapshot(server_core: RefCounted) -> void:
 	server_core.register_tool(
 		"get_runtime_performance_snapshot",
@@ -1719,7 +1817,20 @@ func _register_get_runtime_scene_tree(server_core: RefCounted) -> void:
 	)
 
 func _tool_get_runtime_scene_tree(params: Dictionary) -> Dictionary:
-	return await _request_runtime_probe_poll("get_scene_tree", [params.get("max_depth", 6)], ["mcp:scene_tree"], params)
+	var result: Dictionary = await _request_runtime_probe_poll("get_scene_tree", [params.get("max_depth", 6)], ["mcp:scene_tree"], params)
+	if result.get("status", "") in ["pending", "stale"]:
+		# Check runtime info to verify game session is alive
+		var runtime_info: Dictionary = await _tool_get_runtime_info(params)
+		var is_stale: bool = runtime_info.get("stale", false) or result.get("stale", false)
+		if is_stale or result.get("status", "") == "stale":
+			return {
+				"status": "stale",
+				"stale": true,
+				"scene_tree": {},
+				"message": "Game session is no longer active. The returned scene tree may be cached data from a previous session.",
+				"node_count": 0
+			}
+	return result
 
 func _register_inspect_runtime_node(server_core: RefCounted) -> void:
 	server_core.register_tool(
@@ -1913,7 +2024,18 @@ func _tool_simulate_runtime_input_event(params: Dictionary) -> Dictionary:
 	var event_payload: Variant = params.get("event", null)
 	if not (event_payload is Dictionary):
 		return {"error": "Missing required parameter: event"}
-	return await _request_runtime_probe_poll("simulate_input_event", [event_payload], ["mcp:input_event_simulated"], params)
+
+	# Build match_fields from the event payload to distinguish press/release responses.
+	# Without this, a stale cached response from a previous call could be returned.
+	var match_fields: Dictionary = {}
+	if event_payload.has("type"):
+		match_fields["type"] = event_payload["type"]
+	if event_payload.has("button_index"):
+		match_fields["button_index"] = event_payload["button_index"]
+	if event_payload.has("pressed"):
+		match_fields["pressed"] = event_payload["pressed"]
+
+	return await _request_runtime_probe_poll("simulate_input_event", [event_payload], ["mcp:input_event_simulated"], params, match_fields)
 
 func _register_simulate_runtime_input_action(server_core: RefCounted) -> void:
 	server_core.register_tool(
@@ -2666,7 +2788,7 @@ func _tool_await_runtime_condition(params: Dictionary) -> Dictionary:
 func _register_assert_runtime_condition(server_core: RefCounted) -> void:
 	server_core.register_tool(
 		"assert_runtime_condition",
-		"Assert that a runtime expression becomes truthy within the timeout window.",
+		"Assert that a runtime expression becomes truthy within the timeout window, or matches an expected value when provided.",
 		{
 			"type": "object",
 			"properties": {
@@ -2675,12 +2797,14 @@ func _register_assert_runtime_condition(server_core: RefCounted) -> void:
 				"timeout_ms": {"type": "integer", "default": 3000},
 				"poll_interval_ms": {"type": "integer", "default": 100},
 				"session_id": {"type": "integer"},
-				"description": {"type": "string"}
+				"description": {"type": "string"},
+				"expected": {"type": "string", "description": "Expected value to compare against. If provided, asserts expression == expected instead of truthiness."},
+				"operator": {"type": "string", "description": "Comparison operator: 'eq' (default), 'ne', 'gt', 'gte', 'lt', 'lte'. Only used when expected is provided.", "default": "eq", "enum": ["eq", "ne", "gt", "gte", "lt", "lte"]}
 			},
 			"required": ["expression"]
 		},
 		Callable(self, "_tool_assert_runtime_condition"),
-		{"type": "object", "properties": {"status": {"type": "string"}, "description": {"type": "string"}, "attempts": {"type": "integer"}, "elapsed_ms": {"type": "integer"}, "last_value": {}}},
+		{"type": "object", "properties": {"status": {"type": "string"}, "description": {"type": "string"}, "attempts": {"type": "integer"}, "elapsed_ms": {"type": "integer"}, "last_value": {}, "passed": {"type": "boolean"}, "expected": {"type": "string"}, "actual": {"type": "string"}}},
 		{"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": true},
 		"supplementary", "Debug-Advanced"
 	)
@@ -2689,6 +2813,31 @@ func _tool_assert_runtime_condition(params: Dictionary) -> Dictionary:
 	var wait_result: Dictionary = await _tool_await_runtime_condition(params)
 	if wait_result.has("error"):
 		return wait_result
+
+	var last_value = wait_result.get("last_value", null)
+	var expected_raw = params.get("expected", null)
+	var attempts: int = wait_result.get("attempts", 0)
+	var elapsed_ms: int = wait_result.get("elapsed_ms", 0)
+
+	# If expected is provided, compare using operator instead of truthiness
+	if expected_raw != null:
+		var operator: String = params.get("operator", "eq")
+		var expected_str: String = str(expected_raw)
+		var actual_str: String = str(last_value) if last_value != null else "null"
+		var passed: bool = _compare_values(actual_str, expected_str, operator)
+
+		return {
+			"status": "passed" if passed else "failed",
+			"description": params.get("description", params.get("expression", "")),
+			"passed": passed,
+			"expected": expected_str,
+			"actual": actual_str,
+			"last_value": last_value,
+			"attempts": attempts,
+			"elapsed_ms": elapsed_ms
+		}
+
+	# Original truthy behavior (no expected parameter)
 	if wait_result.get("status", "") == "pending":
 		return {
 			"status": "pending",
@@ -2708,6 +2857,22 @@ func _tool_assert_runtime_condition(params: Dictionary) -> Dictionary:
 		"last_value": wait_result.get("last_value", null),
 		"refresh_result": wait_result.get("refresh_result", {})
 	}
+
+func _compare_values(actual: String, expected: String, operator: String) -> bool:
+	match operator:
+		"eq":
+			return actual == expected
+		"ne":
+			return actual != expected
+		"gt":
+			return float(actual) > float(expected)
+		"gte":
+			return float(actual) >= float(expected)
+		"lt":
+			return float(actual) < float(expected)
+		"lte":
+			return float(actual) <= float(expected)
+	return false
 
 func _request_runtime_probe(command: String, payload: Array, response_messages: Array, params: Dictionary, match_fields: Dictionary = {}) -> Dictionary:
 	var bridge: RefCounted = _get_debugger_bridge()
@@ -3203,14 +3368,14 @@ func _tool_debug_print(params: Dictionary) -> Dictionary:
 
 func _register_execute_editor_script(server_core: RefCounted) -> void:
 	var tool_name: String = "execute_editor_script"
-	var description: String = "Execute a full GDScript in the editor context. Unlike execute_script which only evaluates expressions, this tool can run multi-line scripts with loops, conditionals, and await. Output is captured via print()."
+	var description: String = "Execute a full GDScript in the editor context. Unlike execute_script which only evaluates expressions, this tool can run multi-line scripts with loops, conditionals, and await. Use _custom_print(value) to return output (standard print() goes to editor panel only, not the tool response)."
 
 	var input_schema: Dictionary = {
 		"type": "object",
 		"properties": {
 			"code": {
 				"type": "string",
-				"description": "Full GDScript code to execute. Can contain multiple statements, loops, conditionals, and await."
+				"description": "Full GDScript code to execute. Can contain multiple statements, loops, conditionals, and await. Use _custom_print(value) to send output back to the tool response (standard print() goes to editor panel only)."
 			}
 		},
 		"required": ["code"]
@@ -3275,7 +3440,7 @@ func _tool_execute_editor_script(params: Dictionary) -> Dictionary:
 		else:
 			body_lines.append(line)
 
-	var wrapped_code: String = "extends RefCounted\n\nvar _output: Array = []\nvar edited_scene: Node = null\n\nfunc _custom_print(msg) -> void:\n\t_output.append(str(msg))\n\nfunc get_tree() -> SceneTree:\n\tif edited_scene:\n\t\treturn edited_scene.get_tree()\n\treturn Engine.get_main_loop() as SceneTree\n\nfunc get_node(path) -> Node:\n\tif edited_scene:\n\t\treturn edited_scene.get_node_or_null(path)\n\treturn null\n\n"
+	var wrapped_code: String = "extends RefCounted\n\nvar _output: Array = []\nvar edited_scene: Node = null\n\nfunc _custom_print(msg, msg2 = null) -> void:\n\t_output.append(str(msg))\n\tif msg2 != null: _output.append(str(msg2))\n\nfunc get_tree() -> SceneTree:\n\tif edited_scene:\n\t\treturn edited_scene.get_tree()\n\treturn Engine.get_main_loop() as SceneTree\n\nfunc get_node(path) -> Node:\n\tif edited_scene:\n\t\treturn edited_scene.get_node_or_null(path)\n\treturn null\n\n"
 	if not class_level_lines.is_empty():
 		for line in class_level_lines:
 			wrapped_code += line + "\n"

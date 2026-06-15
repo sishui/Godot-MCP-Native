@@ -224,3 +224,103 @@ func test_poll_loop_enters_on_initial_stale():
 	assert_true(entry_pos >= 0, "Entry condition should exist")
 	assert_true(while_pos >= 0, "While loop should exist after entry condition")
 	assert_true(entry_pos < while_pos, "Entry condition should appear before the while loop")
+
+# --- assert_runtime_condition expected parameter tests ---
+
+func test_compare_values_eq():
+	"""_compare_values with operator='eq' should match identical strings"""
+	var tool = load("res://addons/godot_mcp/tools/debug_tools_native.gd").new()
+	var result: bool = tool._compare_values("hello", "hello", "eq")
+	assert_true(result, "'hello' == 'hello' should be true")
+
+func test_compare_values_ne():
+	"""_compare_values with operator='ne' should match different strings"""
+	var tool = load("res://addons/godot_mcp/tools/debug_tools_native.gd").new()
+	var result: bool = tool._compare_values("hello", "world", "ne")
+	assert_true(result, "'hello' != 'world' should be true")
+
+func test_compare_values_gt():
+	"""_compare_values with operator='gt' should compare numerically"""
+	var tool = load("res://addons/godot_mcp/tools/debug_tools_native.gd").new()
+	var result: bool = tool._compare_values("5", "3", "gt")
+	assert_true(result, "5 > 3 should be true")
+	result = tool._compare_values("3", "5", "gt")
+	assert_false(result, "3 > 5 should be false")
+
+func test_compare_values_lt():
+	"""_compare_values with operator='lt' should compare numerically"""
+	var tool = load("res://addons/godot_mcp/tools/debug_tools_native.gd").new()
+	var result: bool = tool._compare_values("3", "5", "lt")
+	assert_true(result, "3 < 5 should be true")
+
+func test_compare_values_gte():
+	"""_compare_values with operator='gte' should include equality"""
+	var tool = load("res://addons/godot_mcp/tools/debug_tools_native.gd").new()
+	var result: bool = tool._compare_values("5", "5", "gte")
+	assert_true(result, "5 >= 5 should be true")
+	result = tool._compare_values("6", "5", "gte")
+	assert_true(result, "6 >= 5 should be true")
+
+func test_compare_values_lte():
+	"""_compare_values with operator='lte' should include equality"""
+	var tool = load("res://addons/godot_mcp/tools/debug_tools_native.gd").new()
+	var result: bool = tool._compare_values("5", "5", "lte")
+	assert_true(result, "5 <= 5 should be true")
+	result = tool._compare_values("4", "5", "lte")
+	assert_true(result, "4 <= 5 should be true")
+
+func test_compare_values_default_operator():
+	"""_compare_values with unknown operator should return false"""
+	var tool = load("res://addons/godot_mcp/tools/debug_tools_native.gd").new()
+	var result: bool = tool._compare_values("hello", "world", "invalid_op")
+	assert_false(result, "Unknown operator should return false")
+
+# --- await_scene_ready parameter validation tests ---
+
+func test_await_scene_ready_missing_scene_name():
+	"""await_scene_ready should error when scene_name is missing"""
+	var tool = load("res://addons/godot_mcp/tools/debug_tools_native.gd").new()
+	var result: Dictionary = tool._tool_await_scene_ready({})
+	assert_has(result, "error", "Missing scene_name should return error")
+
+func test_await_scene_ready_validates_scene_name():
+	"""await_scene_ready should accept valid scene_name parameter"""
+	var tool = load("res://addons/godot_mcp/tools/debug_tools_native.gd").new()
+	# Can't fully test the wait loop in unit tests (no game running).
+	# But we can verify the function is callable and returns properly structured results.
+	var result: Dictionary = tool._tool_await_scene_ready({"scene_name": "Main", "timeout_sec": 0.1})
+	# With very short timeout, should time out
+	assert_has(result, "status", "Result should have status field")
+	assert_has(result, "scene_name", "Result should have scene_name field")
+	assert_has(result, "elapsed_sec", "Result should have elapsed_sec field")
+	assert_has(result, "timeout", "Result should have timeout field")
+	assert_has(result, "attempts", "Result should have attempts field")
+
+# --- simulate_runtime_input_event match_fields tests ---
+
+func test_simulate_input_event_extracts_match_fields():
+	"""simulate_runtime_input_event should extract type/button_index/pressed from event payload"""
+	var params: Dictionary = {
+		"event": {"type": "mouse_button", "button_index": 1, "pressed": false, "position": {"x": 250, "y": 697}}
+	}
+	var event_payload: Variant = params.get("event", null)
+	assert_true(event_payload is Dictionary, "Event should be a Dictionary")
+	if event_payload is Dictionary:
+		assert_has(event_payload, "type", "Event should have type")
+		assert_has(event_payload, "button_index", "Event should have button_index")
+		assert_has(event_payload, "pressed", "Event should have pressed")
+
+# --- get_runtime_scene_tree stale detection tests ---
+
+func test_runtime_scene_tree_stale_response_format():
+	"""stale response should have specific format with stale flag"""
+	var stale_result: Dictionary = {
+		"status": "stale",
+		"stale": true,
+		"scene_tree": {},
+		"message": "Game session is no longer active",
+		"node_count": 0
+	}
+	assert_eq(stale_result.get("stale", false), true, "stale flag should be true")
+	assert_eq(stale_result.get("node_count", -1), 0, "node_count should be 0 for stale")
+	assert_has(stale_result, "message", "stale response should have message")

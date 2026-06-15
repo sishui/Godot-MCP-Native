@@ -192,7 +192,8 @@ func _register_save_scene(server_core: RefCounted) -> void:
 		"type": "object",
 		"properties": {
 			"status": {"type": "string"},
-			"saved_path": {"type": "string"}
+			"saved_path": {"type": "string"},
+			"operation": {"type": "string", "description": "'save' for same-path save, 'save_as' for different-path export"}
 		}
 	}
 	
@@ -213,50 +214,52 @@ func _register_save_scene(server_core: RefCounted) -> void:
 func _tool_save_scene(params: Dictionary) -> Dictionary:
 	if _scene_operation_in_progress:
 		return {"error": "Scene operation in progress, please retry"}
-	
+
 	var editor_interface: EditorInterface = _get_editor_interface()
 	if not editor_interface:
 		return {"error": "Editor interface not available"}
-	
-	# 获取当前场景根节�?
+
 	var scene_root: Node = _get_user_scene_root()
 	if not scene_root:
 		return {"error": "No scene is currently open"}
-	
-	# 获取保存路径
+
 	var file_path: String = params.get("file_path", "")
-	
+
 	if file_path.is_empty():
-		# 使用当前场景的路�?
+		# Use current scene path
 		var current_scene_path: String = scene_root.scene_file_path
 		if current_scene_path.is_empty():
 			return {"error": "Scene has no file path. Please provide a file_path parameter."}
 		file_path = current_scene_path
-	
-	# 使用PathValidator验证路径安全�?
+
+	# Validate and sanitize path
 	var validation: Dictionary = PathValidator.validate_file_path(file_path, [".tscn"])
 	if not validation["valid"]:
 		return {"error": "Invalid path: " + validation["error"]}
-	
-	# 使用清理后的路径
+
 	file_path = validation["sanitized"]
-	
-	# 创建PackedScene并打�?
+
+	# Detect save-as: target path differs from current scene path
+	var current_path: String = scene_root.scene_file_path
+	var is_save_as: bool = not current_path.is_empty() and current_path != file_path
+
+	# Pack the scene tree
 	var packed_scene: PackedScene = PackedScene.new()
 	var error: Error = packed_scene.pack(scene_root)
-	
+
 	if error != OK:
 		return {"error": "Failed to pack scene: " + error_string(error)}
-	
-	# 保存场景
+
+	# Save to file
 	error = ResourceSaver.save(packed_scene, file_path)
-	
+
 	if error != OK:
 		return {"error": "Failed to save scene: " + error_string(error)}
-	
+
 	return {
 		"status": "success",
-		"saved_path": file_path
+		"saved_path": file_path,
+		"operation": "save_as" if is_save_as else "save"
 	}
 
 # ============================================================================
@@ -290,19 +293,20 @@ func _register_open_scene(server_core: RefCounted) -> void:
 		"properties": {
 			"status": {"type": "string"},
 			"scene_path": {"type": "string"},
-			"root_node_type": {"type": "string"}
+			"root_node_type": {"type": "string"},
+			"verification_tip": {"type": "string"}
 		}
 	}
 	
 	# annotations
 	var annotations: Dictionary = {
 		"readOnlyHint": false,
-		"destructiveHint": true,  # 会关闭当前场�?
+		"destructiveHint": true,  # will close current scene
 		"idempotentHint": false,
 		"openWorldHint": false
 	}
 	
-	# 注册工具
+	# register tool
 	server_core.register_tool(tool_name, description, input_schema,
 						  Callable(self, "_tool_open_scene"),
 						  output_schema, annotations,
@@ -340,20 +344,21 @@ func _tool_open_scene(params: Dictionary) -> Dictionary:
 		return {"error": "Editor interface not available"}
 	
 	editor_interface.open_scene_from_path(scene_path)
-	
+
 	var opened_scene_root: Node = _get_user_scene_root()
 	if not opened_scene_root:
 		_scene_operation_in_progress = false
 		return {"error": "Failed to open scene: " + scene_path}
-	
+
 	var scene_root: Node = _get_user_scene_root()
 	var root_type: String = scene_root.get_class() if scene_root else "Unknown"
-	
+
 	_scene_operation_in_progress = false
 	return {
 		"status": "success",
 		"scene_path": scene_path,
-		"root_node_type": root_type
+		"root_node_type": root_type,
+		"verification_tip": "Call get_editor_logs(source='editor_panel', type=['Error']) to check for scene loading errors. Then call get_current_scene() to confirm the correct scene is active."
 	}
 
 # ============================================================================

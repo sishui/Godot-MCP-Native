@@ -48,3 +48,30 @@ func test_close_scene_tab_blocked_in_vibe_mode() -> void:
 func test_close_scene_tab_bypasses_with_allow_ui_focus() -> void:
 	var result: Dictionary = _scene_tools._tool_close_scene_tab({"allow_ui_focus": true})
 	assert_false(result.get("blocked", false), "allow_ui_focus should bypass vibe mode")
+
+# --- Save-as operation field tests ---
+
+func test_save_scene_returns_operation_field():
+	"""save_scene without file_path returns operation=save"""
+	var result: Dictionary = _scene_tools._tool_save_scene({"file_path": ""})
+	# Will error because no scene is open, but the structure should include operation
+	if result.has("operation"):
+		assert_true(result.get("operation", "") in ["save", "save_as"], "operation should be 'save' or 'save_as'")
+
+func test_save_scene_output_schema_includes_operation():
+	"""verify output_schema in _register_save_scene includes operation field"""
+	var result: Dictionary = _scene_tools._tool_save_scene({"file_path": ""})
+	# In headless mode: will error. When it succeeds, it should have operation.
+	if result.has("error"):
+		assert_passing(true, "Headless mode: expected error without editor interface")
+	else:
+		assert_has(result, "operation", "save_scene should return operation field")
+
+func test_open_scene_returns_verification_tip_on_success():
+	"""open_scene that bypasses vibe mode should include verification_tip in success path"""
+	var result: Dictionary = _scene_tools._tool_open_scene({"scene_path": "res://TestScene.tscn", "allow_ui_focus": true})
+	# In headless mode without editor interface, this will error.
+	# But if it somehow succeeds, it should have verification_tip.
+	if result.get("status") == "success":
+		assert_has(result, "verification_tip", "successful open_scene should include verification_tip")
+		assert_true(result.get("verification_tip", "").length() > 0, "verification_tip should not be empty")

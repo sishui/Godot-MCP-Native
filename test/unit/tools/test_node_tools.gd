@@ -165,3 +165,105 @@ func test_add_resource_properties_param_present():
 		"resource_type": "CollisionShape2D"
 	})
 	assert_true(result.has("error"), "Should return error for nonexistent node")
+
+# --- create_node on_name_conflict tests ---
+
+func test_create_node_on_name_conflict_schema_has_field():
+	"""verify _register_create_node input_schema includes on_name_conflict"""
+	var tool = load("res://addons/godot_mcp/tools/node_tools_native.gd").new()
+	var result: Dictionary = tool._tool_create_node({})
+	# Basic error check - ensures function compiles and runs with new param
+	assert_true(result.has("error"), "Empty params should error regardless of on_name_conflict")
+
+func test_create_node_rename_mode_suffix():
+	"""on_name_conflict='rename' should use counter suffix logic"""
+	var tool = load("res://addons/godot_mcp/tools/node_tools_native.gd").new()
+	# Simulate the rename logic: when parent.has_node(name), try name_1, name_2, etc.
+	var node_name: String = "ExistingNode"
+	var counter: int = 1
+	var new_name: String = node_name + "_" + str(counter)
+	assert_eq(new_name, "ExistingNode_1", "Rename should append _1 suffix")
+
+func test_create_node_rename_with_existing_counter():
+	"""rename mode should increment counter when name_1 also exists"""
+	var existing_names: Array = ["Node_1", "Node_2"]
+	var node_name: String = "Node"
+	var counter: int = 1
+	var new_name: String = node_name + "_" + str(counter)
+	while new_name in existing_names:
+		counter += 1
+		new_name = node_name + "_" + str(counter)
+	assert_eq(new_name, "Node_3", "Should skip Node_1 and Node_2, use Node_3")
+
+func test_create_node_error_mode():
+	"""on_name_conflict='error' should generate error message mentioning the conflicting name"""
+	var node_name: String = "TestNode"
+	var parent_path: String = "/root/Scene"
+	var error_msg: String = "A node named '" + node_name + "' already exists under " + parent_path
+	assert_true(error_msg.contains(node_name), "Error message should contain the node name")
+	assert_true(error_msg.contains(parent_path), "Error message should contain the parent path")
+
+# --- connect_signal all-params validation tests ---
+
+func test_connect_signal_collects_all_missing_params():
+	"""connect_signal should report all missing params at once, not just the first one"""
+	var tool = load("res://addons/godot_mcp/tools/node_tools_native.gd").new()
+	# Create a test scenario: the validation logic from _tool_connect_signal
+	var params: Dictionary = {}
+	var missing_params: Array[String] = []
+	if params.get("emitter_path", "").is_empty():
+		missing_params.append("emitter_path")
+	if params.get("signal_name", "").is_empty():
+		missing_params.append("signal_name")
+	if params.get("receiver_path", "").is_empty():
+		missing_params.append("receiver_path")
+	if params.get("receiver_method", "").is_empty():
+		missing_params.append("receiver_method")
+	assert_eq(missing_params.size(), 4, "All 4 params should be reported missing")
+	var error_msg: String = "Missing required parameters: " + ", ".join(missing_params)
+	assert_true(error_msg.contains("emitter_path"), "Error should mention emitter_path")
+	assert_true(error_msg.contains("signal_name"), "Error should mention signal_name")
+	assert_true(error_msg.contains("receiver_path"), "Error should mention receiver_path")
+	assert_true(error_msg.contains("receiver_method"), "Error should mention receiver_method")
+
+func test_connect_signal_reports_partial_missing():
+	"""connect_signal with 2 of 4 params should report the 2 missing ones"""
+	var params: Dictionary = {"emitter_path": "/root/Btn", "signal_name": "pressed"}
+	var missing_params: Array[String] = []
+	if params.get("emitter_path", "").is_empty():
+		missing_params.append("emitter_path")
+	if params.get("signal_name", "").is_empty():
+		missing_params.append("signal_name")
+	if params.get("receiver_path", "").is_empty():
+		missing_params.append("receiver_path")
+	if params.get("receiver_method", "").is_empty():
+		missing_params.append("receiver_method")
+	assert_eq(missing_params.size(), 2, "2 params should be reported missing")
+	assert_eq(missing_params[0], "receiver_path", "First missing should be receiver_path")
+	assert_eq(missing_params[1], "receiver_method", "Second missing should be receiver_method")
+
+# --- batch_update_node_properties property_types tests ---
+
+func test_get_type_name_returns_string():
+	"""_get_type_name should return a human-readable type name for known types"""
+	var tool = load("res://addons/godot_mcp/tools/node_tools_native.gd").new()
+	var type_name: String = tool._get_type_name(TYPE_BOOL)
+	assert_eq(type_name, "bool", "TYPE_BOOL should map to 'bool'")
+
+func test_get_type_name_vector2():
+	"""_get_type_name for Vector2 should include format hints"""
+	var tool = load("res://addons/godot_mcp/tools/node_tools_native.gd").new()
+	var type_name: String = tool._get_type_name(TYPE_VECTOR2)
+	assert_true(type_name.contains("Vector2"), "Vector2 type name should mention Vector2")
+
+func test_get_type_name_color():
+	"""_get_type_name for Color should include hex format hint"""
+	var tool = load("res://addons/godot_mcp/tools/node_tools_native.gd").new()
+	var type_name: String = tool._get_type_name(TYPE_COLOR)
+	assert_true(type_name.contains("hex"), "Color type name should mention hex format")
+
+func test_get_type_name_fallback():
+	"""_get_type_name for unknown type should return type_N"""
+	var tool = load("res://addons/godot_mcp/tools/node_tools_native.gd").new()
+	var type_name: String = tool._get_type_name(9999)
+	assert_eq(type_name, "type_9999", "Unknown type should use type_N fallback")

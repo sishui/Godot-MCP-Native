@@ -102,6 +102,7 @@
   "debug_continue_and_wait": "Continue and wait for the debugger to pause or complete.",
   "await_debugger_state": "Wait for a specific debugger state.",
   "get_runtime_info": "Get runtime information about the running game.",
+  "await_scene_ready": "Poll the runtime until the specified scene is loaded and ready.",
   "get_runtime_performance_snapshot": "Get a performance snapshot from the running game.",
   "get_runtime_memory_trend": "Get memory usage trends from the running game.",
   "get_runtime_scene_tree": "Get the scene tree from the running game.",

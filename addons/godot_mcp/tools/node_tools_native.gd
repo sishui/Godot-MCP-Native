@@ -49,6 +49,12 @@ func _register_create_node(server_core: RefCounted) -> void:
 				"node_name": {
 					"type": "string",
 					"description": "Name for the new node"
+				},
+				"on_name_conflict": {
+					"type": "string",
+					"description": "Behavior when node_name already exists in parent: 'error' (return error), 'rename' (auto-rename with unique suffix), 'auto' (allow Godot to assign @NodeType@XXXXX name). Default: 'error'.",
+					"default": "error",
+					"enum": ["error", "rename", "auto"]
 				}
 			},
 			"required": ["parent_path", "node_type", "node_name"]
@@ -89,27 +95,44 @@ func _tool_create_node(params: Dictionary) -> Dictionary:
 	var parent_path: String = params.get("parent_path", "")
 	var node_type: String = params.get("node_type", "Node")
 	var node_name: String = params.get("node_name", "NewNode")
-	
+	var on_name_conflict: String = params.get("on_name_conflict", "error")
+
 	var editor_interface: EditorInterface = _get_editor_interface()
 	if not editor_interface:
 		return {"error": "Editor interface not available"}
-	
+
 	var parent: Node = _resolve_node_path(parent_path)
 	if not parent:
 		if parent_path == "/root" or parent_path.is_empty():
 			parent = _get_user_scene_root()
-	
+
 	if not parent:
 		return {"error": "Parent node not found: " + parent_path}
-	
+
 	if not ClassDB.class_exists(node_type):
 		return {"error": "Invalid node type: " + node_type}
-	
+
+	# Handle name conflicts
+	if parent.has_node(node_name):
+		match on_name_conflict:
+			"error":
+				return {"error": "A node named '" + node_name + "' already exists under " + parent_path + ". Use a different name or set on_name_conflict='rename'."}
+			"rename":
+				var counter: int = 1
+				var new_name: String = node_name + "_" + str(counter)
+				while parent.has_node(new_name):
+					counter += 1
+					new_name = node_name + "_" + str(counter)
+				node_name = new_name
+			"auto":
+				# Allow Godot to auto-rename with @ suffix (existing behavior)
+				pass
+
 	var node: Node = ClassDB.instantiate(node_type)
 	node.name = node_name
-	
+
 	var scene_root: Node = _get_user_scene_root()
-	
+
 	# Traverse parent chain to find correct owner for nested/instanced scenes.
 	# If parent is inside an instanced sub-scene, use parent.owner instead of scene_root.
 	var correct_owner: Node = scene_root
@@ -397,6 +420,7 @@ func _tool_batch_update_node_properties(params: Dictionary) -> Dictionary:
 	editor_interface.mark_scene_as_unsaved()
 
 	var results: Array = []
+	var property_types: Dictionary = {}
 	for prepared in prepared_changes:
 		results.append({
 			"node_path": prepared["node_path"],
@@ -404,13 +428,59 @@ func _tool_batch_update_node_properties(params: Dictionary) -> Dictionary:
 			"old_value": _serialize_value(prepared["old_value"]),
 			"new_value": _serialize_value(prepared["node"].get(prepared["property_name"]))
 		})
+		# Collect type info for first node's properties
+		if property_types.is_empty():
+			for prop in prepared["node"].get_property_list():
+				var pname: String = prop.get("name", "")
+				if not pname.is_empty():
+					property_types[pname] = _get_type_name(prop.get("type", TYPE_NIL))
 
 	return {
 		"status": "success",
 		"label": label,
 		"change_count": results.size(),
-		"changes": results
+		"changes": results,
+		"property_types": property_types
 	}
+
+func _get_type_name(type_id: int) -> String:
+	match type_id:
+		TYPE_NIL:
+			return "null"
+		TYPE_BOOL:
+			return "bool"
+		TYPE_INT:
+			return "int"
+		TYPE_FLOAT:
+			return "float"
+		TYPE_STRING:
+			return "string"
+		TYPE_VECTOR2:
+			return "Vector2 (dict {x,y} or string '(x,y)')"
+		TYPE_VECTOR2I:
+			return "Vector2i (dict {x,y} or string '(x,y)')"
+		TYPE_VECTOR3:
+			return "Vector3 (dict {x,y,z} or string '(x,y,z)')"
+		TYPE_VECTOR3I:
+			return "Vector3i"
+		TYPE_COLOR:
+			return "Color (dict {r,g,b,a} or hex '#RRGGBB')"
+		TYPE_RECT2:
+			return "Rect2 (dict {x,y,w,h})"
+		TYPE_TRANSFORM2D:
+			return "Transform2D (dict)"
+		TYPE_PLANE:
+			return "Plane"
+		TYPE_QUATERNION:
+			return "Quaternion"
+		TYPE_AABB:
+			return "AABB"
+		TYPE_BASIS:
+			return "Basis"
+		TYPE_TRANSFORM3D:
+			return "Transform3D"
+		_:
+			return "type_" + str(type_id)
 
 func _register_batch_scene_node_edits(server_core: RefCounted) -> void:
 	server_core.register_tool(
@@ -1755,14 +1825,18 @@ func _tool_connect_signal(params: Dictionary) -> Dictionary:
 	var receiver_method: String = params.get("receiver_method", "")
 	var flags: int = params.get("flags", 0)
 
+	# Collect all missing required parameters at once
+	var missing_params: Array[String] = []
 	if emitter_path.is_empty():
-		return {"error": "Missing required parameter: emitter_path"}
+		missing_params.append("emitter_path")
 	if signal_name.is_empty():
-		return {"error": "Missing required parameter: signal_name"}
+		missing_params.append("signal_name")
 	if receiver_path.is_empty():
-		return {"error": "Missing required parameter: receiver_path"}
+		missing_params.append("receiver_path")
 	if receiver_method.is_empty():
-		return {"error": "Missing required parameter: receiver_method"}
+		missing_params.append("receiver_method")
+	if missing_params.size() > 0:
+		return {"error": "Missing required parameters: " + ", ".join(missing_params)}
 
 	var editor_interface: EditorInterface = _get_editor_interface()
 	if not editor_interface:

@@ -13,7 +13,7 @@ A powerful Godot Engine plugin that integrates AI assistants (Claude, etc.) via 
 - **Full Project Access**: AI assistants can read and modify scripts, scenes, nodes, and resources
 - **Native Implementation**: No Node.js dependency required - runs entirely within Godot
 - **Real-time Editing**: Apply AI suggestions directly in the editor
-- **Comprehensive Tool Set** (154 tools — 30 core + 124 supplementary):
+- **Comprehensive Tool Set** (155 tools — 30 core + 125 supplementary):
   - **Node Tools** (9 core + 11 advanced): Create, modify, manage scene nodes, duplicate, move, rename, signal connections, anchor presets, group management, batch operations, scene auditing
   - **Script Tools** (7 core + 8 advanced): Edit, analyze, create, attach, validate GDScript files, execute scripts, search in files, symbol indexing, definition & reference lookup
   - **Scene Tools** (4 core + 4 advanced): Manipulate scene structure, save scenes, list/open/close scene tabs, project scene listing

@@ -2914,7 +2914,12 @@ func _request_runtime_probe(command: String, payload: Array, response_messages: 
 
 func _make_runtime_probe_request_key(command: String, payload: Array, session_id: int, response_messages: Array, match_fields: Dictionary) -> String:
 	# Use str() concatenation instead of JSON.stringify for lower overhead per call.
+	# Include payload only when non-empty to differentiate calls with different
+	# arguments (e.g. evaluate_expression with different expressions).
+	# Empty payloads (common case) are omitted to keep the key shorter/faster.
 	var key: String = command + "|" + str(session_id) + "|" + str(response_messages)
+	if not payload.is_empty():
+		key += "|" + str(payload)
 	if not match_fields.is_empty():
 		key += "|" + str(match_fields)
 	return key
@@ -3003,9 +3008,6 @@ func _request_runtime_probe_poll(
 		# No cached payload either - return the pending status as-is
 		result["status"] = "timeout"
 		return result
-	if result.get("status") == "stale":
-		result["status"] = "success"
-		result["from_cache"] = true
 	return result
 
 func _is_truthy_runtime_value(value: Variant) -> bool:

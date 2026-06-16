@@ -187,13 +187,15 @@ func test_runtime_probe_polling_reuses_pending_request():
 	assert_eq(second_result.get("node_count"), 3, "Runtime info payload should come from the bridge response")
 	assert_eq(_runtime_bridge.send_count, 2, "Second call re-sends debugger message since first call consumed the pending entry")
 
-func test_extract_response_fallback_marks_stale():
+func test_timeout_fallback_marks_stale():
 	var debug_tools_script: GDScript = load("res://addons/godot_mcp/tools/debug_tools_native.gd")
 	var source_code: String = debug_tools_script.source_code
-	# The fallback loop in _extract_pending_runtime_probe_response should mark data as "stale": true
-	assert_true(source_code.contains('response["status"] = "stale"'), "Fallback should set status to stale")
-	assert_true(source_code.contains('response["stale"] = true'), "Fallback should mark stale=true")
-	# The non-fallback (fresh) path should still use "success"
+	# The stale fallback moved from _extract_pending_runtime_probe_response to
+	# _request_runtime_probe_poll after the poll loop times out.
+	# Verify the timeout handler sets from_cache + stale flags.
+	assert_true(source_code.contains('result["from_cache"] = true'), "Timeout fallback should mark from_cache")
+	assert_true(source_code.contains('result["stale"] = true'), "Timeout fallback should mark stale=true")
+	# The fresh path in _extract_pending_runtime_probe_response should still use "success"
 	assert_true(source_code.contains('response["status"] = "success"'), "Fresh response path should use success")
 
 func test_poll_loop_continues_on_stale():
@@ -324,3 +326,46 @@ func test_runtime_scene_tree_stale_response_format():
 	assert_eq(stale_result.get("stale", false), true, "stale flag should be true")
 	assert_eq(stale_result.get("node_count", -1), 0, "node_count should be 0 for stale")
 	assert_has(stale_result, "message", "stale response should have message")
+
+# --- _make_runtime_probe_request_key tests ---
+
+func test_request_key_format_is_deterministic():
+	"""Same inputs should produce the same key"""
+	var tool = load("res://addons/godot_mcp/tools/debug_tools_native.gd").new()
+	var key1: String = tool._make_runtime_probe_request_key("get_runtime_info", [], -1, ["mcp:runtime_info"], {})
+	var key2: String = tool._make_runtime_probe_request_key("get_runtime_info", [], -1, ["mcp:runtime_info"], {})
+	assert_eq(key1, key2, "Same inputs should produce identical keys")
+
+func test_request_key_differs_with_different_payload():
+	"""Different payloads should produce different keys, even with same command"""
+	var tool = load("res://addons/godot_mcp/tools/debug_tools_native.gd").new()
+	var key_a: String = tool._make_runtime_probe_request_key("evaluate_expression", ["2+2"], -1, ["mcp:expression_result"], {"expression": "2+2"})
+	var key_b: String = tool._make_runtime_probe_request_key("evaluate_expression", ["3+3"], -1, ["mcp:expression_result"], {"expression": "3+3"})
+	assert_ne(key_a, key_b, "Different payloads should produce different keys")
+
+func test_request_key_differs_with_different_match_fields():
+	"""Different match_fields should produce different keys"""
+	var tool = load("res://addons/godot_mcp/tools/debug_tools_native.gd").new()
+	var key_a: String = tool._make_runtime_probe_request_key("inspect_node", ["/root/NodeA"], -1, ["mcp:node"], {"path": "/root/NodeA"})
+	var key_b: String = tool._make_runtime_probe_request_key("inspect_node", ["/root/NodeB"], -1, ["mcp:node"], {"path": "/root/NodeB"})
+	assert_ne(key_a, key_b, "Different match_fields should produce different keys")
+	assert_true(key_a.length() > 0, "Key should not be empty")
+	assert_true(key_a.contains("inspect_node"), "Key should contain command name")
+
+func test_request_key_includes_session_id():
+	"""Different session_ids should produce different keys"""
+	var tool = load("res://addons/godot_mcp/tools/debug_tools_native.gd").new()
+	var key_a: String = tool._make_runtime_probe_request_key("get_runtime_info", [], 1, ["mcp:runtime_info"], {})
+	var key_b: String = tool._make_runtime_probe_request_key("get_runtime_info", [], 2, ["mcp:runtime_info"], {})
+	assert_ne(key_a, key_b, "Different session_ids should produce different keys")
+
+func test_request_key_omits_empty_match_fields():
+	"""Empty match_fields should not appear in the key"""
+	var tool = load("res://addons/godot_mcp/tools/debug_tools_native.gd").new()
+	var key: String = tool._make_runtime_probe_request_key("get_runtime_info", [], -1, ["mcp:runtime_info"], {})
+	# Key should contain command, session_id, payload, response_messages
+	assert_true(key.contains("get_runtime_info"), "Key should contain command")
+	assert_true(key.contains("-1"), "Key should contain session_id")
+	assert_true(key.contains("mcp:runtime_info"), "Key should contain response_messages")
+	# It should NOT end with an extra dangling separator from empty match_fields
+	assert_false(key.ends_with("|"), "Key should not end with |")
